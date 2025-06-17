@@ -1,0 +1,57 @@
+import json
+import gspread
+import os
+from oauth2client.service_account import ServiceAccountCredentials
+from gspread_dataframe import set_with_dataframe
+import pandas as pd
+import requests
+from datetime import datetime
+import time
+
+creds_json = os.environ['GOOGLE_CREDS']
+creds_dict = json.loads(creds_json)
+
+scope = [
+  "https://spreadsheets.google.com/feeds",
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive"
+]
+
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(credentials)
+
+API_KEY = os.environ['FMP_API_KEY']
+COMPANIES = ["META", "AAPL", "AMZN", "NFLX", "GOOGL"]
+
+spreadsheet = client.open("Company Ratios")
+
+for company in COMPANIES:
+    url = f"https://financialmodelingprep.com/api/v3/ratios/{company}?apikey={API_KEY}"
+    response = requests.get(url)
+
+    if response.status_code != 200:
+        print(f"Error fetching data for {company}: HTTP {response.status_code}")
+        continue
+
+    data = response.json()
+    if not data:
+        print(f"No data found for {company}")
+        continue
+
+    df = pd.DataFrame([data[0]])
+    df.insert(0, "Timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    df.insert(0, "Company", company)
+
+    # Check if a worksheet for this company already exists
+    try:
+        worksheet = spreadsheet.worksheet(company)
+    except gspread.exceptions.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(title=company, rows="100", cols="30")
+
+    # Clear the worksheet and write new data
+    worksheet.clear()
+    set_with_dataframe(worksheet, df)
+
+    print(f"✅ Data for {company} written to sheet '{company}'")
+    time.sleep(1)  # polite pause to avoid rate limits
